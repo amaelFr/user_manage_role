@@ -1,0 +1,14 @@
+---
+- set_fact:
+    authorized_key_value: '{{ authorized_key.value if authorized_key is mapping else authorized_key }}'
+
+- name: Invalid SSHkey
+  fail:
+    msg: Invalid SSHkey {{ authorized_key_value }}
+  when: not authorized_key_value|regex_search(ssh_regex) and not ( lookup('file', authorized_key_value)|regex_search(ssh_regex))
+
+- ansible.posix.authorized_key:
+    user: '{{ user.name }}'
+    state: '{{ "absent" if authorized_key.remove|d(False) else "present" }}'
+    key: '{{ authorized_key_value if authorized_key_value|regex_search(ssh_regex) else lookup("file", authorized_key_value) }}'
+    manage_dir: yes

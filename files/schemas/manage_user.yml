@@ -1,0 +1,65 @@
+---
+$schema: http://json-schema.org/draft-07/schema#
+$id: user
+description: user configuration schema
+
+definitions:
+  groups:
+    type: array
+    items:
+      anyOf:
+      - type: string
+      - type: object
+        additionalProperties: false
+        properties:
+          name: { type: string }
+          append: { type: boolean }
+
+
+type: object
+required:
+  - name
+# additionalProperties: false
+properties:
+  state:
+    anyOf:
+    - type: boolean
+    - type: string
+      enum: [ present, absent ]
+  enable: { type: boolean }
+  name: { type: string }
+  group: { type: string }
+  uid: { type: integer }
+  gid: { type: integer }
+  system: { type: boolean }
+  shell_enable: { type: boolean }
+  shell: { type: string }
+  home: { type: string }
+  pass: { type: string }
+  pass_lock: { type: boolean }
+  pass_update: { type: boolean }
+  secondary_groups:
+    $ref: "#/definitions/groups"
+  groups:
+    $ref: "#/definitions/groups"
+  
+  ssh_key:
+    anyOf:
+    - type: boolean
+    - type: object
+      additionalProperties: false
+      size: { type: integer }
+      string: { type: tring }
+      pass: { type: string }
+      type: { type: string }
+      regen: { type: boolean }
+  authorized_keys:
+    type: array
+    items:
+      anyOf:
+      - type: string
+      - type: object
+        additionalProperties: false
+        value: { type: string }
+        remove: { type: boolean }
+

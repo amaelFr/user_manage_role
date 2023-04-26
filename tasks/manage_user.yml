@@ -1,0 +1,90 @@
+---
+- name: "Validate manage_user:{{ manage_user.name|d('!!No name given!!') }} variable"
+  ansible.utils.validate:
+    data: "{{ manage_user }}"
+    criteria:
+      - "{{ lookup('file',  (role_path,'files/schemas/manage_user.yml')|path_join) | from_yaml }}"
+    engine: ansible.utils.jsonschema
+
+- name: Add user and group
+  when: manage_user.state|d(true) == true or manage_user.state|d(omit) == "present"
+  become: true
+  block:
+    - name: Add a group for user
+      register: user_main_group
+      ansible.builtin.group:
+        name: "{{ manage_user.group|d(manage_user.name) }}"
+        state: present
+        gid: "{{ manage_user.gid|d(manage_user.uid)|d(omit) }}"
+        system: "{{ manage_user.system|d(false) }}"
+
+    - name: Add the user
+      ansible.builtin.user:
+        name: "{{ manage_user.name }}"
+        comment: "{{ manage_user.comment|d(omit) }}"
+        uid: "{{ manage_user.uid|d(user_main_group.gid) }}"
+        group: "{{ manage_user.group|d(manage_user.name) }}"
+        shell: "{{ manage_user.shell if manage_user.enable|d(true) and manage_user.shell_enable|d(true) and manage_user.shell|d(false) and not manage_user.system|d(false) else '/usr/sbin/nologin' }}"
+        home: "{{ manage_user.home|d(omit) }}"
+        password: "{{ manage_user.pass|password_hash('sha512') if manage_user.pass is defined else omit }}"
+        password_lock: "{{ omit if manage_user.enable|d(true) and not manage_user.system|d(false) else true}}"
+        update_password: "{{ 'on_create' if manage_user.pass_update|d(false) else omit}}"
+        system: "{{ manage_user.system|d(false) }}"
+      register: manage_user_info
+
+    - name: Add the user to segondary groups
+      ansible.builtin.user:
+        name: "{{ manage_user.name }}"
+        groups: "{{ manage_user.secondary_group.name|d(manage_user.secondary_group) }}"
+        append: "{{ manage_user.secondary_group.append|d(true) }}"
+      loop: "{{ manage_user.secondary_groups|d(manage_user.groups) }}"
+      loop_control:
+        loop_var: manage_user.secondary_group
+      when: manage_user.secondary_groups|d(manage_user.groups)|d(False)
+
+    - name: System user remove public ssh keys 
+      when: manage_user.system|d(false)
+      # become_user: "{{ manage_user.name }}"
+      ansible.builtin.file:
+        path: "{{ (manage_user_info.home, '.ssh/authorized_keys' )| path_join }}"
+        state: absent
+
+    - name: User public ssh keys 
+      when: manage_user.ssh_key|d(False)
+      block:
+        - name: Find private SSHkeys
+          find:
+            paths: "{{ manage_user.home|d((manage_user_info.home, '.ssh/' )| path_join) }}"
+            patterns: '^id[^\.]+$'
+            use_regex: yes
+          register: user_ssh_key_current
+        - name: SSHkey generation
+          ansible.builtin.user:
+            name: "{{ manage_user.name }}"
+            generate_ssh_key: yes
+            ssh_key_bits: "{{ manage_user.ssh_key.size|d(user_manage_ssh_default_key_size) }}"
+            ssh_key_file: "{{ manage_user.ssh_key.file|d(omit) }}"
+            ssh_key_passphrase: "{{ manage_user.ssh_key.pass|d(omit) }}"
+            ssh_key_type: "{{ manage_user.ssh_key.type|d(user_manage_ssh_default_key_type) }}"
+          when: manage_user.ssh_key is defined|d(false) and (user_ssh_key_current.files|length == 0 or manage_user.ssh_key.regen|d(false)
+        
+    - name: Deploy authorized_keys
+      include_tasks: ssh_authorized_key.yml
+      loop: "{{ manage_user.authorized_keys }}"
+      loop_control:
+        loop_var: authorized_key
+      when: manage_user.authorized_keys|d(False)
+
+- name: Remove user and group
+  when: not(manage_user.state|d(true) == true or manage_user.state|d(omit) == "present")
+  block:
+    - name: Delete user
+      ansible.builtin.user:
+        name: "{{ manage_user.name }}"
+        state: absent
+        remove: yes
+    - name: Delete primary group
+      ansible.builtin.group:
+        name: "{{ manage_user.group|d(manage_user.name) }}"
+        state: present
+    # Add delete secondary group
